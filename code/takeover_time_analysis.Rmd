@@ -1,0 +1,128 @@
+---
+title: "takeover_time_analysis"
+output:
+  pdf_document: default
+  html_document: default
+date: "Oct 23, 2019"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Takeover time versus lead time
+
+```{r}
+setwd("C://Doc//resume//apply//TOPS")
+require(ggplot2)
+raw <- read.csv("takeover_time.csv", header = T)
+raw=raw[-73,] #Remove outliers
+```
+
+Here 73rd sample point with 42s takeover time seems suspecious, thus it's removed.
+
+```{r}
+takeover_time = sapply(1:nrow(raw), function(x)
+  ifelse(is.na(raw$Takeover_Time[x]), mean(unlist(raw[x,c("Braking","Steering")]), na.rm = T), raw$Takeover_Time[x]))
+ggplot(data.frame(lead=raw$Lead_time, takeover=takeover_time), aes(x = lead, y = takeover))+geom_point(size=4)+xlim(5,15)+ylim(0,5)+theme_bw(base_size=13)+theme(text=element_text(size=13))
+raw[,"Rearrange_takeover_time"] <- takeover_time
+```
+
+Here we recalculate the takeover time for more observations. If the takeover time is recorded, it won't be changed. Otherwise, replace it by the average value of steering time and Braking time, ignoring the missing value. The scatter plot shows we still does not have enough observations for regression, especially the lead time. We only have 3 different lead time. Next we categorize the lead time 6 and 7 into low-level and 12 into high-level. Check the density plot first.
+
+```{r}
+lead_vs_takeover <- raw[,c("Lead_time","Rearrange_takeover_time")]
+lead_vs_takeover <- lead_vs_takeover[apply(!is.na(lead_vs_takeover), 1,FUN = function(x) all(unlist(x))),]
+lead_vs_takeover$Lead_time[1:2] <- c(7,7)
+lead_vs_takeover$Lead_time <- factor(lead_vs_takeover$Lead_time,labels=c("low","high"))
+ggplot(lead_vs_takeover, aes(x=Lead_time,y=Rearrange_takeover_time))+geom_boxplot()+theme_bw(base_size=13)+theme(text=element_text(size=13))
+ggplot(lead_vs_takeover, aes(x=Rearrange_takeover_time,color=Lead_time))+geom_density()+theme_bw(base_size=13)+theme(text=element_text(size=13))
+```
+
+obviously they have different peaks. It may support my assumption before. It's interesting that the box plot indicates that the high lead time group have greater deviation. I guess drivers have no choice but stopping the secondary task at once when the lead time is short. But drivers in the other group have more time to decide how to tackle with it. Consequently, they have various reaction. low level variance: 0.0985, high level variance: 0.121.
+
+### two sample t test
+```{r}
+shapiro.test(lead_vs_takeover$Rearrange_takeover_time[lead_vs_takeover$Lead_time=="low"])
+shapiro.test(lead_vs_takeover$Rearrange_takeover_time[lead_vs_takeover$Lead_time=="high"])
+t.test(Rearrange_takeover_time~Lead_time,data=lead_vs_takeover)
+```
+
+The two sample t test shows there is no significant difference between them. But it doestnot contradict to the result from desity plot since t test take the variance into consideration.
+
+### Add more variables
+
+```{r}
+ancova_data <- raw[,c("Lead_time","Rearrange_takeover_time","Mean_age","Modality","NDRT")]
+ancova_data <- ancova_data[apply(!is.na(ancova_data), 1,FUN = function(x) all(unlist(x))),]
+ancova_data
+```
+
+The category of lead time and other factors are really similar. Thus we can't do regression or ANCOVA. We have to remove lead time.
+
+```{r}
+anova_data <- raw[,c("Rearrange_takeover_time","Modality","NDRT")]
+anova_data <- anova_data[apply(!(is.na(anova_data)|anova_data==""), 1,FUN = function(x) all(unlist(x))),]
+print(anova_data)
+```
+
+## Modality
+### Haptic
+```{r}
+lapply(split(anova_data[11:30,1],anova_data[11:30,2]),function(x) {if(length(x)!=0){shapiro.test(x)$p.value}})
+bartlett.test(Rearrange_takeover_time~Modality,data=anova_data[11:30,])
+```
+
+The shapiro test shows it doesnot satisfy the normality assumption. And bartlett test shows it doesnot satisfy the homoskedastcity assumption. Thus we tried the logrithm transformation.
+
+```{r}
+anova_data$Rearrange_takeover_time <- log(anova_data$Rearrange_takeover_time)
+lapply(split(anova_data[11:30,1],anova_data[11:30,2]),function(x) {if(length(x)!=0){shapiro.test(x)$p.value}})
+bartlett.test(Rearrange_takeover_time~Modality,data=anova_data[11:30,])
+m1 <- aov(Rearrange_takeover_time~Modality,data=anova_data[11:30,])
+summary(m1)
+```
+
+And the ANOVA table shows haptic warning is significant under 0.99 confidence level. It indicates that Haptic warning will decrease the takeover time significantly. 
+
+### Audio
+```{r}
+lapply(split(anova_data[3:14,1],anova_data[3:14,2]),function(x) {if(length(x)!=0){shapiro.test(x)$p.value}})
+bartlett.test(Rearrange_takeover_time~Modality,data=anova_data[3:14,])
+m2 <- aov(Rearrange_takeover_time~Modality,data=anova_data[3:14,])
+summary(m2)
+```
+
+The audio warning is not significant under 0.95 confidence level. Thus it won't have great influence on the takeover time.
+
+## NDRT
+```{r}
+t.test(anova_data$Rearrange_takeover_time[anova_data$NDRT=="N"],anova_data$Rearrange_takeover_time[anova_data$NDRT=="P"],alternative = "two.sided",conf.level = 0.95)
+t.test(anova_data$Rearrange_takeover_time[anova_data$NDRT=="N"],anova_data$Rearrange_takeover_time[anova_data$NDRT=="E"],alternative = "two.sided",conf.level = 0.95)
+t.test(anova_data$Rearrange_takeover_time[anova_data$NDRT=="N"],anova_data$Rearrange_takeover_time[anova_data$NDRT=="M"],alternative = "two.sided",conf.level = 0.95)
+```
+
+The two sample t-test indicates that `eye distraction task` and `miscellaneous task` will significantly increase the takeover time compared with the no-secondary task test. But `hysical movement related` seems has little influence on it.
+
+##Others
+```{r}
+raw[,"Male_percentage"] <- raw[,"Male"]/(raw[,'Female']+raw[,'Male'])
+ggplot(data=raw,aes(x=Mean_age,y=Rearrange_takeover_time))+geom_point()+theme_bw(base_size=13)+theme(text=element_text(size=13))
+ggplot(data=raw,aes(x=Male_percentage,y=Rearrange_takeover_time))+geom_point()+theme_bw(base_size=13)+theme(text=element_text(size=13))
+m<-lm(log(Rearrange_takeover_time)~Male_percentage+Mean_age,data=raw)
+summary(m)
+par(mfrow=c(2,2))
+plot(m,cex=1.5)
+```
+
+Actually I didnot do much in this section. From the scatter plot we could find that they have no obvious pattern. But I still did the regression. All p-values are insignificant after removing the three suspecious outliers and trasforming the takeover time.
+
+### One thing to be concerned
+
+```{r}
+anova_data
+```
+
+Let's go back to the dataset. The NDRT and Modality has a similar part from No.4 to No.11. When we compare the difference of takeover time with one factor, the result may be distorted by the other one. That is to say, if Audio warning decrease the takeover time while the physical task increase the time, it may just offset the infulence. Here I just ignore this problem. I searched but have no ideal how to deal with it.
+
+
